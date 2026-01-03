@@ -38,7 +38,7 @@ const GameEngine: React.FC = () => {
     const containerRef = useRef<HTMLDivElement>(null);
 
     // Game state refs
-    const gameStateRef = useRef<'MENU' | 'PLAYING' | 'GAME_OVER'>('MENU');
+    const gameStateRef = useRef<'MENU' | 'PLAYING' | 'PAUSED' | 'GAME_OVER'>('MENU');
     const scoreRef = useRef(0);
     const birdRef = useRef<Bird>({ x: 100, y: 300, velocity: 0 });
     const pipesRef = useRef<Pipe[]>([]);
@@ -50,7 +50,7 @@ const GameEngine: React.FC = () => {
     const cloudOffsetRef = useRef(0);
 
     // UI State
-    const [uiState, setUiState] = useState<'MENU' | 'PLAYING' | 'GAME_OVER'>('MENU');
+    const [uiState, setUiState] = useState<'MENU' | 'PLAYING' | 'PAUSED' | 'GAME_OVER'>('MENU');
     const [menuScreen, setMenuScreen] = useState<MenuScreen>('MAIN');
     const [displayScore, setDisplayScore] = useState(0);
     const [playerName, setPlayerName] = useState('');
@@ -239,12 +239,47 @@ const GameEngine: React.FC = () => {
         }
     }, [playSound]);
 
+    const pauseGame = useCallback(() => {
+        if (gameStateRef.current === 'PLAYING') {
+            gameStateRef.current = 'PAUSED';
+            setUiState('PAUSED');
+            cancelAnimationFrame(animationRef.current);
+            // Pause bg music
+            const bgMusic = audioRefs.current.bgMusic;
+            if (bgMusic && bgMusicPlayingRef.current) {
+                bgMusic.pause();
+            }
+        }
+    }, []);
+
+    const resumeGame = useCallback(() => {
+        if (gameStateRef.current === 'PAUSED') {
+            gameStateRef.current = 'PLAYING';
+            setUiState('PLAYING');
+            lastTimeRef.current = performance.now();
+            // Resume bg music
+            const bgMusic = audioRefs.current.bgMusic;
+            if (bgMusic && bgMusicPlayingRef.current) {
+                bgMusic.play().catch(() => { });
+            }
+        }
+    }, []);
+
     // Input handling
     useEffect(() => {
         const handleKey = (e: KeyboardEvent) => {
             if (e.code === 'Space') {
                 e.preventDefault();
                 if (gameStateRef.current === 'PLAYING') jump();
+            }
+            // Pause/Resume with ESC or X
+            if (e.code === 'Escape' || e.code === 'KeyX') {
+                e.preventDefault();
+                if (gameStateRef.current === 'PLAYING') {
+                    pauseGame();
+                } else if (gameStateRef.current === 'PAUSED') {
+                    resumeGame();
+                }
             }
         };
         window.addEventListener('keydown', handleKey);
@@ -514,11 +549,71 @@ const GameEngine: React.FC = () => {
             {/* Canvas */}
             <canvas
                 ref={canvasRef}
-                className={`absolute inset-0 w-full h-full ${uiState === 'PLAYING' ? 'block' : 'hidden'}`}
+                className={`absolute inset-0 w-full h-full ${uiState === 'PLAYING' || uiState === 'PAUSED' ? 'block' : 'hidden'}`}
                 onClick={handleCanvasClick}
                 onTouchStart={(e) => { e.preventDefault(); handleCanvasClick(); }}
             />
 
+            {/* Pause Button - visible during gameplay */}
+            {uiState === 'PLAYING' && (
+                <button
+                    onClick={pauseGame}
+                    className="absolute top-4 right-4 w-12 h-12 flex items-center justify-center rounded-lg transition-transform hover:scale-110 active:scale-95 z-20"
+                    style={{
+                        background: 'rgba(0,0,0,0.5)',
+                        border: '2px solid rgba(255,255,255,0.3)',
+                    }}
+                >
+                    <span className="text-white text-2xl">⏸</span>
+                </button>
+            )}
+
+            {/* PAUSED SCREEN */}
+            {uiState === 'PAUSED' && (
+                <div
+                    className="absolute inset-0 flex items-center justify-center z-30"
+                    style={{ background: 'rgba(0,0,0,0.7)' }}
+                >
+                    <div className="text-center p-6">
+                        <h2
+                            className="text-4xl sm:text-5xl font-black text-white mb-8"
+                            style={{
+                                fontFamily: '"Courier New", monospace',
+                                textShadow: '3px 3px 0 #000',
+                            }}
+                        >
+                            PAUSED
+                        </h2>
+
+                        <div className="flex flex-col gap-3 items-center">
+                            <MenuButton onClick={resumeGame}>
+                                ▶ RESUME
+                            </MenuButton>
+
+                            <button
+                                onClick={() => {
+                                    stopAllAudio();
+                                    bgMusicPlayingRef.current = false;
+                                    gameStateRef.current = 'MENU';
+                                    setUiState('MENU');
+                                    setMenuScreen('MAIN');
+                                }}
+                                className="text-white/80 text-sm hover:text-white transition-colors mt-2"
+                                style={{ fontFamily: '"Courier New", monospace' }}
+                            >
+                                ✕ QUIT TO MENU
+                            </button>
+                        </div>
+
+                        <p
+                            className="text-white/50 text-xs mt-8 tracking-widest"
+                            style={{ fontFamily: '"Courier New", monospace' }}
+                        >
+                            ESC or X to resume
+                        </p>
+                    </div>
+                </div>
+            )}
             {/* MENU */}
             {uiState === 'MENU' && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center overflow-hidden"
