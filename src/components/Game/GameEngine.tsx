@@ -48,6 +48,8 @@ const GameEngine: React.FC = () => {
     const randomSoundTimerRef = useRef<number>(0);
     const dprRef = useRef<number>(1);
     const cloudOffsetRef = useRef(0);
+    const screenShakeRef = useRef(0);
+    const bgBirdsRef = useRef<{ x: number, y: number, speed: number }[]>([]);
 
     // UI State
     const [uiState, setUiState] = useState<'MENU' | 'PLAYING' | 'PAUSED' | 'GAME_OVER'>('MENU');
@@ -56,6 +58,8 @@ const GameEngine: React.FC = () => {
     const [playerName, setPlayerName] = useState('');
     const [leaderboard, setLeaderboard] = useState<ScoreEntry[]>([]);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [isMuted, setIsMuted] = useState(false);
+    const isMutedRef = useRef(false);
 
     // Assets
     const birdImgRef = useRef<HTMLImageElement | null>(null);
@@ -132,6 +136,7 @@ const GameEngine: React.FC = () => {
     }, []);
 
     const playSound = useCallback((type: 'hitCid' | 'pakadMc' | 'bcCid' | 'score') => {
+        if (isMutedRef.current) return;
         const audio = audioRefs.current[type];
         if (audio && audioUnlockedRef.current) {
             audio.currentTime = 0;
@@ -140,12 +145,35 @@ const GameEngine: React.FC = () => {
     }, []);
 
     const startBgMusic = useCallback(() => {
+        if (isMutedRef.current) return;
         const bgMusic = audioRefs.current.bgMusic;
         if (bgMusic && !bgMusicPlayingRef.current && audioUnlockedRef.current) {
             bgMusic.currentTime = 0;
             bgMusic.play().catch(() => { });
             bgMusicPlayingRef.current = true;
         }
+    }, []);
+
+    const toggleMute = useCallback(() => {
+        setIsMuted(prev => {
+            const newMuted = !prev;
+            isMutedRef.current = newMuted; // Sync ref
+            // If muting, pause all audio
+            if (newMuted) {
+                Object.values(audioRefs.current).forEach(audio => {
+                    if (audio) audio.pause();
+                });
+            } else {
+                // If unmuting during gameplay, resume bg music
+                if (gameStateRef.current === 'PLAYING') {
+                    const bgMusic = audioRefs.current.bgMusic;
+                    if (bgMusic && bgMusicPlayingRef.current) {
+                        bgMusic.play().catch(() => { });
+                    }
+                }
+            }
+            return newMuted;
+        });
     }, []);
 
     const fetchLeaderboard = async () => {
@@ -201,6 +229,33 @@ const GameEngine: React.FC = () => {
         setDisplayScore(scoreRef.current);
         cancelAnimationFrame(animationRef.current);
 
+        // Trigger screen shake
+        screenShakeRef.current = 20;
+
+        // Run shake animation for a brief moment
+        const canvas = canvasRef.current;
+        const ctx = canvas?.getContext('2d', { alpha: false });
+        if (canvas && ctx) {
+            const dpr = dprRef.current;
+            const shakeLoop = () => {
+                if (screenShakeRef.current > 0.5) {
+                    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+                    const shakeX = (Math.random() - 0.5) * screenShakeRef.current;
+                    const shakeY = (Math.random() - 0.5) * screenShakeRef.current;
+                    ctx.translate(shakeX, shakeY);
+                    drawPixelArt(ctx, canvas.width / dpr, canvas.height / dpr);
+                    screenShakeRef.current *= 0.85;
+                    requestAnimationFrame(shakeLoop);
+                } else {
+                    // Final clean frame
+                    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+                    drawPixelArt(ctx, canvas.width / dpr, canvas.height / dpr);
+                    screenShakeRef.current = 0;
+                }
+            };
+            requestAnimationFrame(shakeLoop);
+        }
+
         // Stop only bg music and pakad-mc, NOT hitCid
         const bgMusic = audioRefs.current.bgMusic;
         const pakadMc = audioRefs.current.pakadMc;
@@ -220,11 +275,13 @@ const GameEngine: React.FC = () => {
         }
         bgMusicPlayingRef.current = false;
 
-        // Play hit sound
-        const hitAudio = audioRefs.current.hitCid;
-        if (hitAudio) {
-            hitAudio.currentTime = 0;
-            hitAudio.play().catch(() => { });
+        // Play hit sound (respect mute)
+        if (!isMutedRef.current) {
+            const hitAudio = audioRefs.current.hitCid;
+            if (hitAudio) {
+                hitAudio.currentTime = 0;
+                hitAudio.play().catch(() => { });
+            }
         }
 
         if (playerName.trim()) {
@@ -329,7 +386,16 @@ const GameEngine: React.FC = () => {
                 accumulator -= FRAME_TIME;
             }
 
+            // Apply screen shake
             ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            if (screenShakeRef.current > 0) {
+                const shakeX = (Math.random() - 0.5) * screenShakeRef.current;
+                const shakeY = (Math.random() - 0.5) * screenShakeRef.current;
+                ctx.translate(shakeX, shakeY);
+                screenShakeRef.current *= 0.9; // Decay
+                if (screenShakeRef.current < 0.5) screenShakeRef.current = 0;
+            }
+
             drawPixelArt(ctx, canvas.width / dpr, canvas.height / dpr);
 
             animationRef.current = requestAnimationFrame(loop);
@@ -349,13 +415,13 @@ const GameEngine: React.FC = () => {
 
         cloudOffsetRef.current += 0.5;
 
-        // Random pakad-mc sound
+        // Random pakad-mc sound (only if not muted)
         randomSoundTimerRef.current += FRAME_TIME;
         if (randomSoundTimerRef.current > 10000 + Math.random() * 8000) {
             randomSoundTimerRef.current = 0;
             if (gameStateRef.current === 'PLAYING') {
                 const pakadAudio = audioRefs.current.pakadMc;
-                if (pakadAudio && audioUnlockedRef.current) {
+                if (pakadAudio && audioUnlockedRef.current && !isMutedRef.current) {
                     pakadAudio.currentTime = 0;
                     pakadAudio.play().catch(() => { });
                 }
@@ -438,6 +504,26 @@ const GameEngine: React.FC = () => {
         drawCloud(250 - offset * 0.2, 80, 1);
         drawCloud(w - 200 + offset * 0.1, 60, 1.3);
         drawCloud(w - 400 + offset * 0.15, 100, 0.9);
+
+        // Background Birds (small V shapes flying)
+        const drawBgBird = (x: number, y: number, size: number) => {
+            ctx.strokeStyle = '#555';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            // Left wing
+            ctx.moveTo(x - size, y + size * 0.3);
+            ctx.lineTo(x, y);
+            // Right wing
+            ctx.lineTo(x + size, y + size * 0.3);
+            ctx.stroke();
+        };
+
+        // Animated background birds
+        const birdOffset = cloudOffsetRef.current * 1.5;
+        drawBgBird((birdOffset * 0.8) % (w + 100) - 50, 120, 8);
+        drawBgBird((birdOffset * 0.6 + 200) % (w + 100) - 50, 90, 6);
+        drawBgBird((birdOffset * 0.7 + 400) % (w + 100) - 50, 150, 7);
+        drawBgBird((birdOffset * 0.5 + 100) % (w + 100) - 50, 180, 5);
 
         // Pipes
         pipesRef.current.forEach(pipe => {
@@ -546,26 +632,45 @@ const GameEngine: React.FC = () => {
 
     return (
         <div ref={containerRef} className="relative w-full h-screen overflow-hidden">
-            {/* Canvas */}
-            <canvas
-                ref={canvasRef}
-                className={`absolute inset-0 w-full h-full ${uiState === 'PLAYING' || uiState === 'PAUSED' ? 'block' : 'hidden'}`}
-                onClick={handleCanvasClick}
-                onTouchStart={(e) => { e.preventDefault(); handleCanvasClick(); }}
-            />
+            {/* Canvas with screen shake */}
+            <div
+                className={`absolute inset-0 ${uiState === 'PLAYING' || uiState === 'PAUSED' || uiState === 'GAME_OVER' ? 'block' : 'hidden'}`}
+                style={{
+                    transform: screenShakeRef.current > 0 ? `translate(${(Math.random() - 0.5) * screenShakeRef.current}px, ${(Math.random() - 0.5) * screenShakeRef.current}px)` : 'none',
+                }}
+            >
+                <canvas
+                    ref={canvasRef}
+                    className="absolute inset-0 w-full h-full"
+                    onClick={handleCanvasClick}
+                    onTouchStart={(e) => { e.preventDefault(); handleCanvasClick(); }}
+                />
+            </div>
 
-            {/* Pause Button - visible during gameplay */}
+            {/* Pause & Mute Buttons - visible during gameplay */}
             {uiState === 'PLAYING' && (
-                <button
-                    onClick={pauseGame}
-                    className="absolute top-4 right-4 w-12 h-12 flex items-center justify-center rounded-lg transition-transform hover:scale-110 active:scale-95 z-20"
-                    style={{
-                        background: 'rgba(0,0,0,0.5)',
-                        border: '2px solid rgba(255,255,255,0.3)',
-                    }}
-                >
-                    <span className="text-white text-2xl">⏸</span>
-                </button>
+                <div className="absolute top-4 right-4 flex gap-2 z-20">
+                    <button
+                        onClick={toggleMute}
+                        className="w-12 h-12 flex items-center justify-center rounded-lg transition-transform hover:scale-110 active:scale-95"
+                        style={{
+                            background: 'rgba(0,0,0,0.5)',
+                            border: '2px solid rgba(255,255,255,0.3)',
+                        }}
+                    >
+                        <span className="text-white text-xl">{isMuted ? '🔇' : '🔊'}</span>
+                    </button>
+                    <button
+                        onClick={pauseGame}
+                        className="w-12 h-12 flex items-center justify-center rounded-lg transition-transform hover:scale-110 active:scale-95"
+                        style={{
+                            background: 'rgba(0,0,0,0.5)',
+                            border: '2px solid rgba(255,255,255,0.3)',
+                        }}
+                    >
+                        <span className="text-white text-2xl">⏸</span>
+                    </button>
+                </div>
             )}
 
             {/* PAUSED SCREEN */}

@@ -7,7 +7,7 @@ export async function GET() {
     try {
         const scores = await Score.find({}).sort({ score: -1 }).limit(10);
         return NextResponse.json({ success: true, data: scores });
-    } catch (error) {
+    } catch (_error) {
         return NextResponse.json({ success: false, error: 'Failed to fetch scores' }, { status: 400 });
     }
 }
@@ -18,7 +18,7 @@ export async function POST(request: Request) {
         const body = await request.json();
         const score = await Score.create(body);
         return NextResponse.json({ success: true, data: score }, { status: 201 });
-    } catch (error) {
+    } catch (_error) {
         return NextResponse.json({ success: false, error: 'Failed to create score' }, { status: 400 });
     }
 }

@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 
-const MONGODB_URI = process.env.MONGODB_URI || "mongodb+srv://flying:kamble@cluster0.bkwuz89.mongodb.net/?appName=Cluster0";
+const MONGODB_URI = process.env.MONGODB_URI!;
 
 if (!MONGODB_URI) {
     throw new Error(
@@ -13,11 +13,11 @@ if (!MONGODB_URI) {
  * in development. This prevents connections growing exponentially
  * during API Route usage.
  */
-// @ts-ignore
+// @ts-expect-error - accessing global mongoose cache
 let cached = global.mongoose;
 
 if (!cached) {
-    // @ts-ignore
+    // @ts-expect-error - setting global mongoose cache
     cached = global.mongoose = { conn: null, promise: null };
 }
 
